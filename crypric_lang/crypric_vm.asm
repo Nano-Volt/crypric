@@ -1,6 +1,6 @@
 ; ===== Cryptic Virtual Machine (Enhanced) =====
-; A professional bytecode VM implementation
-; Features: Dynamic string handling, proper error checking, enhanced instruction set
+; A professional bytecode VM implementation with large memory support
+; Features: 256KB bytecode, dynamic string handling, proper error checking
 ; Assemble: nasm -f elf64 crypric_vm.asm -o crypric_vm.o
 ; Link:     ld crypric_vm.o -o crypric_vm
 
@@ -10,15 +10,18 @@ section .data
         hello db "hello", 0
         world db "world", 0
         error db "ERROR: ", 0
+        newline db 10, 0
     
     ; File handling
     bytecode_file db "out.cbin", 0
-    open_error db "Failed to open bytecode file", 0
-    read_error db "Failed to read bytecode", 0
+    open_error db "Failed to open bytecode file", 10, 0
+    read_error db "Failed to read bytecode", 10, 0
+    overflow_error db "Bytecode too large", 10, 0
     
     ; VM Constants
-    MAX_BYTECODE_SIZE equ 4096
-    MAX_LOOP_DEPTH equ 16
+    MAX_BYTECODE_SIZE equ 262144  ; 256KB = 256 * 1024
+    MAX_LOOP_DEPTH equ 64         ; Increased for larger programs
+    STRING_TABLE_SIZE equ 16      ; Support 16 predefined strings
 
 section .bss
     ; VM State
@@ -26,9 +29,10 @@ section .bss
     bytecode_size resq 1         ; Actual bytecode size
     loop_counters resb MAX_LOOP_DEPTH  ; Loop stack
     loop_stack_ptr resb 1        ; Loop stack pointer
+    vm_registers resb 8          ; General purpose registers R0-R7
     
-    ; Memory
-    bytecode resb MAX_BYTECODE_SIZE    ; Bytecode buffer
+    ; Memory - aligned for performance
+    bytecode resb MAX_BYTECODE_SIZE    ; 256KB bytecode buffer
 
 section .text
     global _start
@@ -55,6 +59,12 @@ initialize_vm:
     mov qword [bytecode_size], 0
     mov byte [loop_stack_ptr], 0
     
+    ; Clear registers
+    xor rax, rax
+    mov rcx, 8
+    mov rdi, vm_registers
+    rep stosb
+    
     pop rbp
     ret
 
@@ -67,21 +77,22 @@ load_bytecode:
     mov rax, 2          ; sys_open
     mov rdi, bytecode_file
     mov rsi, 0          ; O_RDONLY
-    mov rdx, 0          ; mode
+    mov rdx, 0o644      ; permissions
     syscall
     
     ; Error checking
     cmp rax, 0
     jg .file_opened
-    mov rsi, open_error
-    call print_error
+    mov rdi, open_error
+    call print_string
     jmp .exit_error
     
 .file_opened:
-    mov rdi, rax        ; file descriptor
+    mov r8, rax         ; preserve file descriptor
     
     ; Read bytecode
     mov rax, 0          ; sys_read
+    mov rdi, r8         ; file descriptor
     mov rsi, bytecode
     mov rdx, MAX_BYTECODE_SIZE
     syscall
@@ -89,19 +100,33 @@ load_bytecode:
     ; Error checking
     cmp rax, 0
     jg .read_success
-    mov rsi, read_error
-    call print_error
-    jmp .exit_error
+    mov rdi, read_error
+    call print_string
+    jmp .close_and_exit
     
 .read_success:
+    ; Check if file is too large
+    cmp rax, MAX_BYTECODE_SIZE
+    jl .size_ok
+    mov rdi, overflow_error
+    call print_string
+    jmp .close_and_exit
+
+.size_ok:
     mov [bytecode_size], rax
     
     ; Close file
     mov rax, 3          ; sys_close
+    mov rdi, r8
     syscall
     
     pop rbp
     ret
+
+.close_and_exit:
+    mov rax, 3          ; sys_close
+    mov rdi, r8
+    syscall
 
 .exit_error:
     mov rax, 60         ; sys_exit
@@ -112,16 +137,18 @@ load_bytecode:
 execute_vm:
     push rbp
     mov rbp, rsp
+    push r12
+    push r13
     
-    mov rsi, bytecode           ; rsi = bytecode base
-    mov rcx, [bytecode_size]    ; rcx = total size
-    
+    mov r12, bytecode           ; r12 = bytecode base (preserved)
+    mov r13, [bytecode_size]    ; r13 = total size (preserved)
+
 .vm_loop:
-    mov rdx, [ip]               ; current offset
-    cmp rdx, rcx
+    mov rcx, [ip]               ; current offset
+    cmp rcx, r13
     jge .vm_exit                ; end of bytecode
     
-    mov al, [rsi + rdx]         ; fetch opcode
+    mov al, [r12 + rcx]         ; fetch opcode
     inc qword [ip]              ; advance IP
     
     ; Dispatch based on opcode
@@ -135,8 +162,12 @@ execute_vm:
     je .vm_exit
     cmp al, 0x05                ; PRINT_CHAR
     je .op_print_char
+    cmp al, 0x06                ; PRINT_NEWLINE
+    je .op_print_newline
+    cmp al, 0x07                ; LOAD_IMMEDIATE
+    je .op_load_immediate
     
-    ; Unknown opcode - skip
+    ; Unknown opcode - skip with warning
     jmp .vm_loop
 
 .op_print_string:
@@ -147,6 +178,10 @@ execute_vm:
     call handle_print_char
     jmp .vm_loop
 
+.op_print_newline:
+    call handle_print_newline
+    jmp .vm_loop
+
 .op_loop_start:
     call handle_loop_start
     jmp .vm_loop
@@ -155,7 +190,13 @@ execute_vm:
     call handle_loop_end
     jmp .vm_loop
 
+.op_load_immediate:
+    call handle_load_immediate
+    jmp .vm_loop
+
 .vm_exit:
+    pop r13
+    pop r12
     pop rbp
     ret
 
@@ -163,99 +204,151 @@ execute_vm:
 handle_print_string:
     push rbp
     mov rbp, rsp
+    push r12
+    
+    mov r12, bytecode           ; preserve bytecode base
     
     ; Get string index from bytecode
-    mov rdx, [ip]
-    mov al, [rsi + rdx]
+    mov rcx, [ip]
+    mov al, [r12 + rcx]
     inc qword [ip]
     
-    ; Select string based on index
-    cmp al, 0
-    je .print_hello
-    cmp al, 1
-    je .print_world
-    
-    ; Default to hello
-    mov rdi, hello
-    jmp .do_print
-    
-.print_hello:
-    mov rdi, hello
-    jmp .do_print
-    
-.print_world:
-    mov rdi, world
+    ; Validate string index
+    cmp al, STRING_TABLE_SIZE
+    jl .index_valid
+    mov al, 0                   ; default to first string on error
 
-.do_print:
+.index_valid:
+    ; Select string based on index
+    mov rdi, string_table
+    mov rsi, 6                  ; average string length + null
+    mul rsi                     ; rax = index * 6
+    add rdi, rax                ; rdi = string_table + offset
+    
     call print_string
+    
+    pop r12
     pop rbp
     ret
 
 handle_print_char:
     push rbp
     mov rbp, rsp
+    push r12
+    
+    mov r12, bytecode
     
     ; Get character from bytecode
-    mov rdx, [ip]
-    mov al, [rsi + rdx]
+    mov rcx, [ip]
+    mov al, [r12 + rcx]
     inc qword [ip]
     
-    ; Print single character
-    mov [bytecode], al  ; reuse buffer for output
-    mov rax, 1          ; sys_write
-    mov rdi, 1          ; stdout
-    mov rsi, bytecode   ; character buffer
-    mov rdx, 1          ; length
+    ; Print single character using stack buffer
+    push rax                    ; reserve space on stack
+    mov rax, 1                  ; sys_write
+    mov rdi, 1                  ; stdout
+    mov rsi, rsp                ; character on stack
+    mov rdx, 1                  ; length
     syscall
+    pop rax                     ; cleanup stack
     
+    pop r12
+    pop rbp
+    ret
+
+handle_print_newline:
+    push rbp
+    mov rbp, rsp
+    
+    mov rdi, newline
+    call print_string
+    
+    pop rbp
+    ret
+
+handle_load_immediate:
+    push rbp
+    mov rbp, rsp
+    push r12
+    
+    mov r12, bytecode
+    
+    ; Get register index (0-7)
+    mov rcx, [ip]
+    mov al, [r12 + rcx]
+    inc qword [ip]
+    
+    ; Get immediate value
+    mov rcx, [ip]
+    mov bl, [r12 + rcx]
+    inc qword [ip]
+    
+    ; Store in register (R0-R7)
+    and al, 0x07                ; ensure 0-7 range
+    movzx rax, al
+    mov [vm_registers + rax], bl
+    
+    pop r12
     pop rbp
     ret
 
 handle_loop_start:
     push rbp
     mov rbp, rsp
+    push r12
+    
+    mov r12, bytecode
     
     ; Get loop counter and push to stack
-    mov rdx, [ip]
-    mov al, [rsi + rdx]
+    mov rcx, [ip]
+    mov al, [r12 + rcx]
     inc qword [ip]
     
     mov bl, [loop_stack_ptr]
     cmp bl, MAX_LOOP_DEPTH
     jge .stack_overflow
     
-    ; Store loop counter
+    ; Store loop counter and current IP for return
     movzx rbx, bl
     mov [loop_counters + rbx], al
-    inc byte [loop_stack_ptr]
+    mov rax, [ip]
+    mov [loop_counters + rbx + 32], al  ; store IP in upper half
     
-    pop rbp
-    ret
+    inc byte [loop_stack_ptr]
+    jmp .exit
 
 .stack_overflow:
     mov rdi, error
     call print_string
-    jmp .exit_error
+
+.exit:
+    pop r12
+    pop rbp
+    ret
 
 handle_loop_end:
     push rbp
     mov rbp, rsp
+    push r12
+    
+    mov r12, bytecode
     
     ; Check if we have active loops
     mov al, [loop_stack_ptr]
     cmp al, 0
     jle .no_active_loop
     
-    ; Decrement counter and check
+    ; Get current loop from stack
     dec al
     movzx rbx, al
+    
+    ; Decrement counter and check
     dec byte [loop_counters + rbx]
     jz .loop_finished
     
-    ; Loop again - jump back to start
-    mov rdx, [ip]
-    sub rdx, 3          ; jump back to LOOP_START opcode
-    mov [ip], rdx
+    ; Loop again - jump back to stored IP
+    mov rax, [loop_counters + rbx + 32]  ; get stored IP
+    mov [ip], rax
     jmp .exit
 
 .loop_finished:
@@ -263,6 +356,7 @@ handle_loop_end:
     dec byte [loop_stack_ptr]
 
 .exit:
+    pop r12
     pop rbp
     ret
 
@@ -270,6 +364,7 @@ handle_loop_end:
     ; Error: LOOP_END without LOOP_START
     mov rdi, error
     call print_string
+    pop r12
     pop rbp
     ret
 
@@ -278,12 +373,14 @@ print_string:
     ; Input: rdi = string pointer
     push rbp
     mov rbp, rsp
+    push r12
+    
+    mov r12, rdi        ; preserve string pointer
     
     ; Calculate string length
-    mov rsi, rdi
     xor rcx, rcx
 .length_loop:
-    cmp byte [rsi + rcx], 0
+    cmp byte [r12 + rcx], 0
     je .print
     inc rcx
     jmp .length_loop
@@ -291,32 +388,11 @@ print_string:
 .print:
     mov rax, 1          ; sys_write
     mov rdi, 1          ; stdout
+    mov rsi, r12        ; string pointer
     mov rdx, rcx        ; length
     syscall
     
-    pop rbp
-    ret
-
-print_error:
-    ; Input: rsi = error message
-    push rbp
-    mov rbp, rsp
-    
-    ; Print error prefix
-    mov rax, 1
-    mov rdi, 2          ; stderr
-    mov rsi, error
-    mov rdx, 7          ; "ERROR: " length
-    syscall
-    
-    ; Print specific error message
-    mov rax, 1
-    mov rdi, 2
-    ; rsi already contains message
-    mov rdx, 0
-    ; Calculate message length would be needed here
-    syscall
-    
+    pop r12
     pop rbp
     ret
 
