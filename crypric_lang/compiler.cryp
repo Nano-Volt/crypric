@@ -1,0 +1,99 @@
+# Cryptic Compiler (compiler.cryp)
+# Rust-like syntax support
+
+# --- Lexer ---
+fn lexer(input):
+    tokens = []
+    i = 0
+    while i < len(input):
+        if input[i] in ' \n\t': i += 1; continue
+        if input[i] in '(){};': tokens.append(input[i]); i += 1; continue
+        if input[i] == '"':
+            start = i
+            i += 1
+            while i < len(input) and input[i] != '"': i += 1
+            i += 1
+            tokens.append(input[start:i])
+            continue
+        if input[i].isalpha():
+            start = i
+            while i < len(input) and (input[i].isalnum() or input[i] == '_'): i += 1
+            tokens.append(input[start:i])
+            continue
+        if input[i].isdigit():
+            start = i
+            while i < len(input) and input[i].isdigit(): i += 1
+            tokens.append(input[start:i])
+            continue
+        i += 1
+    return tokens
+
+# --- Parser ---
+fn parser(tokens):
+    ast = []
+    i = 0
+    def parse_block():
+        nonlocal i
+        block = []
+        while i < len(tokens) and tokens[i] != '}':
+            if tokens[i] == 'print':
+                i += 1
+                if tokens[i] == '(': i += 1
+                val = tokens[i]
+                i += 1
+                if tokens[i] == ')': i += 1
+                if tokens[i] == ';': i += 1
+                block.append(('PRINT', val))
+                continue
+            if tokens[i] == 'loop':
+                i += 1
+                count = int(tokens[i])
+                i += 1
+                if tokens[i] == '{': i += 1
+                body = parse_block()
+                if tokens[i] == '}': i += 1
+                block.append(('LOOP', count, body))
+                continue
+            i += 1
+        return block
+    while i < len(tokens):
+        if tokens[i] == 'fn':
+            i += 1
+            name = tokens[i]
+            i += 1
+            if tokens[i] == '(': i += 1
+            if tokens[i] == ')': i += 1
+            if tokens[i] == '{': i += 1
+            body = parse_block()
+            if tokens[i] == '}': i += 1
+            ast.append(('FN', name, body))
+            continue
+        i += 1
+    return ast
+
+# --- Code Generator ---
+fn codegen(ast):
+    bytecode = []
+    def gen_block(block):
+        for node in block:
+            if node[0] == 'PRINT':
+                bytecode += [0x02, 0x01] # PRINT opcode, string index
+            if node[0] == 'LOOP':
+                bytecode += [0x03, node[1]] # LOOP_START opcode, count
+                gen_block(node[2])
+                bytecode += [0x04] # LOOP_END opcode
+    for node in ast:
+        if node[0] == 'FN' and node[1] == 'main':
+            gen_block(node[2])
+    bytecode += [0xFF] # RETURN
+    return bytecode
+
+# --- Main ---
+fn main():
+    src = read('example.cryp')
+    tokens = lexer(src)
+    ast = parser(tokens)
+    bytecode = codegen(ast)
+    write('out.cbin', bytecode)
+
+main()

@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+import sys, struct
+
+def lexer(input):
+    tokens = []
+    i = 0
+    while i < len(input):
+        if input[i] in ' \n\t': i += 1; continue
+        if input[i] in '(){};': tokens.append(input[i]); i += 1; continue
+        if input[i] == '"':
+            start = i
+            i += 1
+            while i < len(input) and input[i] != '"': i += 1
+            i += 1
+            tokens.append(input[start:i])
+            continue
+        if input[i].isalpha():
+            start = i
+            while i < len(input) and (input[i].isalnum() or input[i] == '_'): i += 1
+            tokens.append(input[start:i])
+            continue
+        if input[i].isdigit():
+            start = i
+            while i < len(input) and input[i].isdigit(): i += 1
+            tokens.append(input[start:i])
+            continue
+        i += 1
+    return tokens
+
+def parser(tokens):
+    ast = []
+    i = 0
+    def parse_block():
+        nonlocal i
+        block = []
+        while i < len(tokens) and tokens[i] != '}':
+            if tokens[i] == 'print':
+                i += 1
+                if tokens[i] == '(': i += 1
+                val = tokens[i]
+                i += 1
+                if tokens[i] == ')': i += 1
+                if tokens[i] == ';': i += 1
+                block.append(('PRINT', val))
+                continue
+            if tokens[i] == 'loop':
+                i += 1
+                count = int(tokens[i])
+                i += 1
+                if tokens[i] == '{': i += 1
+                body = parse_block()
+                if tokens[i] == '}': i += 1
+                block.append(('LOOP', count, body))
+                continue
+            i += 1
+        return block
+    while i < len(tokens):
+        if tokens[i] == 'fn':
+            i += 1
+            name = tokens[i]
+            i += 1
+            if tokens[i] == '(': i += 1
+            if tokens[i] == ')': i += 1
+            if tokens[i] == '{': i += 1
+            body = parse_block()
+            if tokens[i] == '}': i += 1
+            ast.append(('FN', name, body))
+            continue
+        i += 1
+    return ast
+
+def codegen(ast):
+    bytecode = bytearray()
+    def gen_block(block):
+        nonlocal bytecode
+        for node in block:
+            if node[0] == 'PRINT':
+                bytecode += bytes([0x02, 0x01]) # PRINT opcode, string index
+            if node[0] == 'LOOP':
+                bytecode += bytes([0x03, node[1]]) # LOOP_START opcode, count
+                gen_block(node[2])
+                bytecode += bytes([0x04]) # LOOP_END opcode
+    for node in ast:
+        if node[0] == 'FN' and node[1] == 'main':
+            gen_block(node[2])
+    bytecode += bytes([0xFF]) # RETURN
+    return bytecode
+
+def vm(bytecode):
+    ip = 0
+    loop_counter = 0
+    while ip < len(bytecode):
+        opcode = bytecode[ip]
+        if opcode == 0x02: # PRINT
+            print("hello", end='')
+            ip += 2
+        elif opcode == 0x03: # LOOP_START
+            loop_counter = bytecode[ip+1]
+            ip += 2
+        elif opcode == 0x04: # LOOP_END
+            loop_counter -= 1
+            if loop_counter > 0:
+                ip -= 2
+            else:
+                ip += 1
+        elif opcode == 0xFF: # RETURN
+            break
+        else:
+            ip += 1
+
+def main():
+    if len(sys.argv) < 4 or sys.argv[2] != '-o':
+        print('Usage: ccrp <file>.cryp -o <name>')
+        sys.exit(1)
+    srcfile = sys.argv[1]
+    outname = sys.argv[3]
+    with open(srcfile) as f:
+        src = f.read()
+    tokens = lexer(src)
+    ast = parser(tokens)
+    bytecode = codegen(ast)
+    # Write a self-contained runner
+    with open(outname, 'w') as f:
+        f.write(f"#!/usr/bin/env python3\nimport sys\nbytecode = {list(bytecode)}\n" +
+                "def vm(bytecode):\n    ip = 0\n    loop_counter = 0\n    while ip < len(bytecode):\n        opcode = bytecode[ip]\n        if opcode == 0x02:\n            print('hello', end='')\n            ip += 2\n        elif opcode == 0x03:\n            loop_counter = bytecode[ip+1]\n            ip += 2\n        elif opcode == 0x04:\n            loop_counter -= 1\n            if loop_counter > 0:\n                ip -= 2\n            else:\n                ip += 1\n        elif opcode == 0xFF:\n            break\n        else:\n            ip += 1\nvm(bytecode)\n")
+    import os
+    os.chmod(outname, 0o755)
+    print(f'Compiled to {outname}')
+
+if __name__ == '__main__':
+    main()

@@ -22,3 +22,5 @@ How to Use:
 
 4. Run the VM (currently uses hardcoded bytecode in ASM for demo):
    ./crypric_vm
+   
+5.ccrp is used to covert to binary

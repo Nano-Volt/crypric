@@ -1,9 +1,6 @@
 fn main() {
-    print('hello');
+    print("hello");
+    loop 3 {
+        print("hello");
+    }
 }
-
-loop 1 {
-    shvm main
-}
-
-return 0
