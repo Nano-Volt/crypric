@@ -1,5 +1,5 @@
 # ==============================================================================================================================
-# (c)  2025 Nano volt  The cryptic ide  for more copy right  visit https://github.com/Nano-Volt/crypric?tab=Apache-2.0-1-ov-file
+# (c)  2025 Nano volt  The cryptic ide  for more copy right information visit https://github.com/Nano-Volt/crypric?tab=Apache-2.0-1-ov-file
 #=====================================================================================================================================
 
 import sys
