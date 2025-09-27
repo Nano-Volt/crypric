@@ -1,5 +1,4 @@
-# Cryptic Compiler (compiler.cryp)
-# Rust-like syntax support
+# Cryptic Compiler (compiler.cryp)(soon a builder system)
 
 # --- Lexer ---
 fn lexer(input):
