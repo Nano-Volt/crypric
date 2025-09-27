@@ -1,0 +1,76 @@
+{
+  "scopeName": "source.cryptic",
+  "name": "Cryptic",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.cryptic",
+          "match": "//.*$"
+        },
+        {
+          "name": "comment.block.cryptic",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.cryptic",
+          "match": "\\b(fn|loop|print|return|if|else|while|break|continue)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "storage.type.cryptic",
+          "match": "\\b(int|string|bool)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.cryptic",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.cryptic",
+              "match": "\\\\."
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.cryptic",
+          "match": "\\b\\d+\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.cryptic",
+          "match": "[\\+\\-\\*/=;{}()]"
+        }
+      ]
+    }
+  },
+  "fileTypes": ["cryp"],
+  "uuid": "f5a1f8e2-cryptic-lang-syntax"
+}
