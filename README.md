@@ -96,3 +96,8 @@ Contact
 -------
 If you're stuck or want help extending a part (e.g., making the VM read a file, adding CALL/RET, or building a real parser),
 ask me — I’ll code it step-by-step with explanations.
+
+How to install
+```git clone https://github.com/Nano-Volt/crypric.git```
+```cd crypric```
+```cd crypric_lang```
