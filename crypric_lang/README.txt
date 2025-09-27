@@ -24,3 +24,6 @@ How to Use:
    ./crypric_vm
    
 5.ccrp is used to covert to binary
+
+6.syntax: 1.chmod +x syntax.sh
+          2../syntax.sh
